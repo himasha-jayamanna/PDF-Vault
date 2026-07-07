@@ -1,0 +1,38 @@
+{
+  "name": "pdf-vault",
+  "version": "1.0.0",
+  "description": "Secure offline PDF utility for merging, splitting, compressing, and converting PDFs",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win --dir",
+    "package": "electron-builder --win"
+  },
+  "dependencies": {
+    "@quicktoolsone/pdf-compress": "^2.0.0",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^3.11.174"
+  },
+  "devDependencies": {
+    "electron": "^31.3.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.offline.pdfvault",
+    "productName": "PDF Vault",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}

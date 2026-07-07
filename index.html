@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF Vault</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <!-- Load local pdf-lib from node_modules -->
+  <script src="node_modules/pdf-lib/dist/pdf-lib.min.js"></script>
+  <!-- Load local pdfjs-dist from node_modules -->
+  <script src="node_modules/pdfjs-dist/build/pdf.min.js"></script>
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="logo-icon"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+        </div>
+        <div class="brand-text">
+          <h1>PDF Vault</h1>
+          <span>Secure Offline Engine</span>
+        </div>
+      </div>
+
+      <nav class="nav-menu">
+        <button class="nav-item active" data-tab="merge">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon"><path d="m8 3 4 8 5-5 5 15H2L8 3z"/></svg>
+          Merge PDFs
+        </button>
+        <button class="nav-item" data-tab="split">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 12h18"/></svg>
+          Split PDF
+        </button>
+        <button class="nav-item" data-tab="img-to-pdf">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+          Images to PDF
+        </button>
+        <button class="nav-item" data-tab="compress">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M12 10v5"/><path d="m9 12 3 3 3-3"/><path d="M8 18h8"/></svg>
+          Compress PDF
+        </button>
+        <button class="nav-item" data-tab="pdf-to-img">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon"><path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v1"/><path d="M12 18a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2h-6a2 2 0 0 0-2 2Z"/><circle cx="16" cy="12" r="1"/><path d="m22 16-1.5-1.5a1 1 0 0 0-1.4 0L16 17.5"/></svg>
+          PDF to Image
+        </button>
+      </nav>
+
+      <div class="theme-toggle-container">
+        <button class="theme-toggle-btn" id="theme-toggle-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="theme-icon sun-icon"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+          <span class="theme-text">Light Mode</span>
+        </button>
+      </div>
+
+      <div class="security-badge">
+        <div class="badge-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <div class="badge-content">
+          <h4>100% Private & Safe</h4>
+          <p>No internet required. Files never leave your device.</p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Workspace -->
+    <main class="workspace">
+      <!-- Header -->
+      <header class="workspace-header">
+        <div class="header-title">
+          <h2 id="current-tool-title">Merge PDF Documents</h2>
+          <p id="current-tool-desc">Combine multiple PDF files in any order you choose.</p>
+        </div>
+        <div class="status-indicator">
+          <span class="pulse-dot"></span>
+          <span class="status-text">Engine Ready (Offline)</span>
+        </div>
+      </header>
+
+      <!-- Panel: Merge PDF -->
+      <section class="tool-panel active" id="panel-merge">
+        <div class="drop-zone" id="drop-zone-merge">
+          <input type="file" id="file-input-merge" multiple accept=".pdf" class="file-input">
+          <div class="drop-zone-content">
+            <div class="drop-icon-container">
+              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="drop-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+            </div>
+            <h3>Drag & Drop PDF files here</h3>
+            <p>or <span>browse files</span> from your computer</p>
+          </div>
+        </div>
+
+        <div class="workspace-layout hidden" id="workspace-merge">
+          <div class="file-list-container">
+            <div class="section-header">
+              <h3>Selected Files (<span id="count-merge">0</span>)</h3>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-secondary btn-sm" id="btn-add-more-merge">Add Files</button>
+                <button class="btn btn-secondary btn-sm" id="btn-clear-merge">Clear All</button>
+              </div>
+            </div>
+            <input type="file" id="file-input-add-more-merge" multiple accept=".pdf" style="display: none;">
+            <ul class="file-list" id="list-merge">
+              <!-- Dynamically populated files -->
+            </ul>
+          </div>
+          <div class="control-sidebar">
+            <div class="card">
+              <h3>Merge Settings</h3>
+              <p class="card-desc">Reorder your files by dragging or using the arrows before compiling.</p>
+              
+              <div class="form-group">
+                <label for="merge-filename">Output Filename</label>
+                <input type="text" id="merge-filename" value="merged_document.pdf" placeholder="document.pdf">
+              </div>
+
+              <button class="btn btn-primary w-full" id="btn-run-merge">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                Merge Documents
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Panel: Split PDF -->
+      <section class="tool-panel" id="panel-split">
+        <div class="drop-zone" id="drop-zone-split">
+          <input type="file" id="file-input-split" accept=".pdf" class="file-input">
+          <div class="drop-zone-content">
+            <div class="drop-icon-container">
+              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="drop-icon"><path d="M3 14h18"/><path d="M20 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
+            </div>
+            <h3>Drag & Drop a PDF file here</h3>
+            <p>or <span>browse files</span> from your computer</p>
+          </div>
+        </div>
+
+        <div class="workspace-layout hidden" id="workspace-split">
+          <div class="file-preview-card">
+            <div class="file-meta">
+              <div class="file-meta-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+              </div>
+              <div class="file-meta-info">
+                <h3 id="split-filename">document.pdf</h3>
+                <p><span id="split-filesize">0 KB</span> • <span id="split-pagecount">0</span> pages</p>
+              </div>
+              <button class="btn-close" id="btn-clear-split">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+            
+            <div class="split-mode-selection">
+              <div class="mode-card active" data-mode="range">
+                <h4>Extract Ranges</h4>
+                <p>Export specific ranges or pages (e.g. 1-3, 5, 8-10)</p>
+              </div>
+              <div class="mode-card" data-mode="all">
+                <h4>Split All Pages</h4>
+                <p>Extract every single page into a separate PDF file</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="control-sidebar">
+            <div class="card">
+              <h3>Split Settings</h3>
+              
+              <div id="split-settings-range">
+                <div class="form-group">
+                  <label for="split-ranges">Page Ranges</label>
+                  <input type="text" id="split-ranges" value="1" placeholder="e.g. 1-3, 5-7, 9">
+                  <small class="form-help">Use commas to separate multiple pages or ranges.</small>
+                </div>
+              </div>
+
+              <div id="split-settings-all" class="hidden">
+                <p class="info-note">Every page will be extracted and saved. You will choose a folder where all pages will be saved as <em>[filename]_page_X.pdf</em>.</p>
+              </div>
+
+              <div class="form-group">
+                <label for="split-out-filename">Output Filename Base</label>
+                <input type="text" id="split-out-filename" value="split_document" placeholder="split_document">
+              </div>
+
+              <button class="btn btn-primary w-full" id="btn-run-split">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg>
+                Split Document
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Panel: Images to PDF -->
+      <section class="tool-panel" id="panel-img-to-pdf">
+        <div class="drop-zone" id="drop-zone-img">
+          <input type="file" id="file-input-img" multiple accept="image/png, image/jpeg, image/jpg" class="file-input">
+          <div class="drop-zone-content">
+            <div class="drop-icon-container">
+              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="drop-icon"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+            </div>
+            <h3>Drag & Drop PNG/JPG images here</h3>
+            <p>or <span>browse files</span> from your computer</p>
+          </div>
+        </div>
+
+        <div class="workspace-layout hidden" id="workspace-img">
+          <div class="image-grid-container">
+            <div class="section-header">
+              <h3>Selected Images (<span id="count-img">0</span>)</h3>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-secondary btn-sm" id="btn-add-more-img">Add Images</button>
+                <button class="btn btn-secondary btn-sm" id="btn-clear-img">Clear All</button>
+              </div>
+            </div>
+            <input type="file" id="file-input-add-more-img" multiple accept="image/png, image/jpeg, image/jpg" style="display: none;">
+            <div class="image-preview-grid" id="grid-img">
+              <!-- Dynamically populated image cards -->
+            </div>
+          </div>
+
+          <div class="control-sidebar">
+            <div class="card">
+              <h3>Page Settings</h3>
+              
+              <div class="form-group">
+                <label for="img-page-size">Page Size</label>
+                <select id="img-page-size">
+                  <option value="A4">A4 (Standard)</option>
+                  <option value="US_Letter">US Letter</option>
+                  <option value="Fit">Fit to Image Size</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="img-orientation">Orientation</label>
+                <select id="img-orientation">
+                  <option value="portrait">Portrait</option>
+                  <option value="landscape">Landscape</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="img-margin">Page Margins</label>
+                <select id="img-margin">
+                  <option value="none">No Margin (0px)</option>
+                  <option value="small">Small Margin (20px)</option>
+                  <option value="large">Large Margin (40px)</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="img-out-filename">Output Filename</label>
+                <input type="text" id="img-out-filename" value="images_converted.pdf" placeholder="document.pdf">
+              </div>
+
+              <button class="btn btn-primary w-full" id="btn-run-img">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon"><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/><polyline points="16 3 21 3 21 8"/><line x1="21" y1="3" x2="9" y2="15"/></svg>
+                Generate PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Panel: Compress PDF -->
+      <section class="tool-panel" id="panel-compress">
+        <div class="drop-zone" id="drop-zone-compress">
+          <input type="file" id="file-input-compress" accept=".pdf" class="file-input">
+          <div class="drop-zone-content">
+            <div class="drop-icon-container">
+              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="drop-icon"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M12 10v5"/><path d="m9 12 3 3 3-3"/><path d="M8 18h8"/></svg>
+            </div>
+            <h3>Drag & Drop a PDF file here to compress</h3>
+            <p>or <span>browse files</span> from your computer</p>
+          </div>
+        </div>
+
+        <div class="workspace-layout hidden" id="workspace-compress">
+          <div class="file-preview-card">
+            <div class="file-meta">
+              <div class="file-meta-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+              </div>
+              <div class="file-meta-info">
+                <h3 id="compress-filename">document.pdf</h3>
+                <p><span id="compress-filesize">0 KB</span> • <span id="compress-pagecount">0</span> pages</p>
+              </div>
+              <button class="btn-close" id="btn-clear-compress">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+            
+            <div class="compress-mode-selection">
+              <div class="mode-card active" data-level="recommended">
+                <h4>Recommended Compression</h4>
+                <p>Good balance of quality and size. Optimizes text to look sharp while shrinking image elements.</p>
+              </div>
+              <div class="mode-card" data-level="maximum">
+                <h4>Extreme Compression</h4>
+                <p>Lowest quality, smallest file size. Drastically reduces image resolutions for tight email attachments.</p>
+              </div>
+              <div class="mode-card" data-level="lossless">
+                <h4>Less Compression</h4>
+                <p>Uncompromised quality. Retains original vector text, searchability, and high-resolution elements.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="control-sidebar">
+            <div class="card">
+              <h3>Compress Settings</h3>
+              
+              <div class="form-group">
+                <label for="compress-out-filename">Output Filename</label>
+                <input type="text" id="compress-out-filename" value="compressed_document.pdf" placeholder="document.pdf">
+              </div>
+
+              <button class="btn btn-primary w-full" id="btn-run-compress">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M12 10v5"/><path d="m9 12 3 3 3-3"/><path d="M8 18h8"/></svg>
+                Compress PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Panel: PDF to Image -->
+      <section class="tool-panel" id="panel-pdf-to-img">
+        <div class="drop-zone" id="drop-zone-pdf-to-img">
+          <input type="file" id="file-input-pdf-to-img" accept=".pdf" class="file-input">
+          <div class="drop-zone-content">
+            <div class="drop-icon-container">
+              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="drop-icon"><path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v1"/><path d="M12 18a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2h-6a2 2 0 0 0-2 2Z"/><circle cx="16" cy="12" r="1"/><path d="m22 16-1.5-1.5a1 1 0 0 0-1.4 0L16 17.5"/></svg>
+            </div>
+            <h3>Drag & Drop a PDF file here to convert to images</h3>
+            <p>or <span>browse files</span> from your computer</p>
+          </div>
+        </div>
+
+        <div class="workspace-layout hidden" id="workspace-pdf-to-img">
+          <div class="image-grid-container">
+            <div class="section-header">
+              <h3>Select Pages to Convert (<span id="count-pdf-to-img">0</span> pages selected)</h3>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-secondary btn-sm" id="btn-select-all-pdf-to-img">Select All</button>
+                <button class="btn btn-secondary btn-sm" id="btn-deselect-all-pdf-to-img">Deselect All</button>
+                <button class="btn btn-secondary btn-sm" id="btn-clear-pdf-to-img">Clear PDF</button>
+              </div>
+            </div>
+            <div class="image-preview-grid" id="grid-pdf-to-img">
+              <!-- Dynamically populated page thumbnail cards -->
+            </div>
+          </div>
+
+          <div class="control-sidebar">
+            <div class="card">
+              <h3>Export Settings</h3>
+              
+              <div class="form-group">
+                <label for="pdf-to-img-format">Image Format</label>
+                <select id="pdf-to-img-format">
+                  <option value="png">PNG (Lossless, transparent)</option>
+                  <option value="jpeg" selected>JPEG (High compression, white bg)</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="pdf-to-img-resolution">Resolution (Quality)</label>
+                <select id="pdf-to-img-resolution">
+                  <option value="2" selected>High Quality (150 DPI)</option>
+                  <option value="3">Ultra Quality (300 DPI)</option>
+                  <option value="1">Standard Quality (72 DPI)</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="pdf-to-img-out-prefix">Output Filename Prefix</label>
+                <input type="text" id="pdf-to-img-out-prefix" value="page" placeholder="page">
+              </div>
+
+              <button class="btn btn-primary w-full" id="btn-run-pdf-to-img">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon"><path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v1"/><path d="M12 18a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2h-6a2 2 0 0 0-2 2Z"/><circle cx="16" cy="12" r="1"/><path d="m22 16-1.5-1.5a1 1 0 0 0-1.4 0L16 17.5"/></svg>
+                Convert to Images
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Loading & Processing Modal -->
+  <div class="modal-overlay hidden" id="status-modal">
+    <div class="glass-modal">
+      <div class="spinner-container">
+        <div class="spinner"></div>
+      </div>
+      <h3 id="modal-title">Processing PDF</h3>
+      <p id="modal-message">Performing operations locally in memory. Please wait...</p>
+      <div class="progress-bar-container">
+        <div class="progress-bar-fill" id="modal-progress" style="width: 0%"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notifications -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="renderer.js" type="module"></script>
+</body>
+</html>
