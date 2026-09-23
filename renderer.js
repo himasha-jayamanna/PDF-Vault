@@ -1,4 +1,5 @@
 import { compress } from './node_modules/@quicktoolsone/pdf-compress/dist/index.js';
+const { decryptPDF, isEncrypted } = window.PDFDecrypt;
 
 // State variables
 const state = {
@@ -38,6 +39,25 @@ const statusModal = document.getElementById('status-modal');
 const modalTitle = document.getElementById('modal-title');
 const modalMessage = document.getElementById('modal-message');
 const modalProgress = document.getElementById('modal-progress');
+
+// Sidebar Toggle
+const sidebarToggleBtn = document.getElementById('sidebar-toggle');
+const sidebarToggleIcon = document.getElementById('sidebar-toggle-icon');
+const sidebar = document.querySelector('.sidebar');
+if (sidebarToggleBtn) {
+  sidebarToggleBtn.addEventListener('click', () => {
+    sidebar.classList.toggle('collapsed');
+    
+    // Toggle chevron rotation and button position
+    if (sidebar.classList.contains('collapsed')) {
+      sidebarToggleIcon.style.transform = 'rotate(180deg)';
+      sidebarToggleBtn.style.left = '16px';
+    } else {
+      sidebarToggleIcon.style.transform = 'rotate(0deg)';
+      sidebarToggleBtn.style.left = '240px';
+    }
+  });
+}
 
 // Switch Tab Navigation
 navItems.forEach(item => {
@@ -119,6 +139,14 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+// Security: Sanitize user-controlled strings before inserting into innerHTML.
+// Converts any HTML special characters (e.g. <script>) into safe escaped entities.
+function sanitizeText(str) {
+  const div = document.createElement('div');
+  div.textContent = String(str);
+  return div.innerHTML;
+}
+
 // Read file helper
 function readFileAsArrayBuffer(file) {
   return new Promise((resolve, reject) => {
@@ -127,6 +155,30 @@ function readFileAsArrayBuffer(file) {
     reader.onerror = () => reject(reader.error);
     reader.readAsArrayBuffer(file);
   });
+}
+
+// Security & Decoding: Decrypts PDF streams if the file has an owner password restriction
+// Fixes "blank pages" bug in pdf-lib when manipulating partially encrypted streams.
+async function loadSafePdfBuffer(file) {
+  const arrayBuffer = await readFileAsArrayBuffer(file);
+  let uint8 = new Uint8Array(arrayBuffer);
+  try {
+    const encInfo = await isEncrypted(uint8);
+    if (encInfo.encrypted) {
+      uint8 = await decryptPDF(uint8, '');
+    }
+  } catch (err) {
+    console.warn("Decryption skipped or failed:", err.message);
+  }
+  return uint8.buffer;
+}
+
+// Fetch and display dynamic App Version
+const versionSpan = document.getElementById('app-version');
+if (versionSpan && window.api && window.api.getAppVersion) {
+  window.api.getAppVersion()
+    .then(version => { versionSpan.textContent = version; })
+    .catch(err => console.warn("Failed to retrieve app version", err));
 }
 
 // ==========================================
@@ -144,6 +196,7 @@ const fileInputAddMoreMerge = document.getElementById('file-input-add-more-merge
 
 // Drag & drop handlers
 setupDragAndDrop(dropZoneMerge, fileInputMerge, handleMergeFiles);
+setupDragAndDrop(workspaceMerge, fileInputAddMoreMerge, handleMergeFiles);
 
 // Add more files listeners
 btnAddMoreMerge.addEventListener('click', () => fileInputAddMoreMerge.click());
@@ -165,9 +218,14 @@ function setupDragAndDrop(zone, input, handler) {
   });
 
   zone.addEventListener('drop', (e) => {
+    e.preventDefault();
     const dt = e.dataTransfer;
-    const files = dt.files;
-    handler(files);
+    if (dt && dt.files && dt.files.length > 0) {
+      const actualFiles = Array.from(dt.files).filter(f => f.name);
+      if (actualFiles.length > 0) {
+        handler(dt.files);
+      }
+    }
   });
 
   input.addEventListener('change', (e) => {
@@ -187,9 +245,9 @@ async function handleMergeFiles(files) {
 
   for (const file of pdfFiles) {
     try {
-      const arrayBuffer = await readFileAsArrayBuffer(file);
+      const arrayBuffer = await loadSafePdfBuffer(file);
       const { PDFDocument } = PDFLib;
-      const tempPdf = await PDFDocument.load(arrayBuffer);
+      const tempPdf = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
       const pageCount = tempPdf.getPageCount();
 
       state.merge.files.push({
@@ -227,6 +285,10 @@ function renderMergeList() {
   state.merge.files.forEach((file, index) => {
     const li = document.createElement('li');
     li.className = 'file-item';
+    li.style.cursor = 'grab';
+    li.draggable = true;
+    li.dataset.index = index;
+    
     li.innerHTML = `
       <div class="file-order-badge">${index + 1}</div>
       <div class="file-info-main">
@@ -234,17 +296,11 @@ function renderMergeList() {
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
         </div>
         <div class="file-details">
-          <div class="file-name" title="${file.name}">${file.name}</div>
+          <div class="file-name" title="${sanitizeText(file.name)}">${sanitizeText(file.name)}</div>
           <div class="file-size">${formatBytes(file.size)} • ${file.pageCount} pages</div>
         </div>
       </div>
       <div class="file-actions">
-        <button class="btn-action btn-up" ${index === 0 ? 'disabled style="opacity: 0.3; cursor: default;"' : ''}>
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
-        </button>
-        <button class="btn-action btn-down" ${index === state.merge.files.length - 1 ? 'disabled style="opacity: 0.3; cursor: default;"' : ''}>
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-        </button>
         <button class="btn-action btn-delete">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
         </button>
@@ -252,9 +308,41 @@ function renderMergeList() {
     `;
 
     // Hook button events
-    li.querySelector('.btn-up').addEventListener('click', () => swapMergeItems(index, index - 1));
-    li.querySelector('.btn-down').addEventListener('click', () => swapMergeItems(index, index + 1));
     li.querySelector('.btn-delete').addEventListener('click', () => deleteMergeItem(index));
+
+    // HTML5 Drag and Drop Handlers
+    li.addEventListener('dragstart', (e) => {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', index);
+      li.classList.add('dragging');
+      setTimeout(() => li.style.opacity = '0.5', 0);
+    });
+
+    li.addEventListener('dragend', () => {
+      li.classList.remove('dragging');
+      li.style.opacity = '1';
+      
+      // Save new order on drag end (fires reliably compared to drop)
+      const newOrder = Array.from(listMerge.children).map(child => parseInt(child.dataset.index));
+      const newFiles = newOrder.map(i => state.merge.files[i]);
+      state.merge.files = newFiles;
+      renderMergeList();
+    });
+
+    li.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const draggingItem = listMerge.querySelector('.dragging');
+      if (draggingItem && draggingItem !== li) {
+        const bounding = li.getBoundingClientRect();
+        const offset = bounding.y + (bounding.height / 2);
+        if (e.clientY - offset > 0) {
+          listMerge.insertBefore(draggingItem, li.nextSibling);
+        } else {
+          listMerge.insertBefore(draggingItem, li);
+        }
+      }
+    });
 
     listMerge.appendChild(li);
   });
@@ -276,6 +364,41 @@ btnClearMerge.addEventListener('click', () => {
   state.merge.files = [];
   renderMergeList();
 });
+
+const btnPreviewMerge = document.getElementById('btn-preview-merge');
+if (btnPreviewMerge) {
+  btnPreviewMerge.addEventListener('click', async () => {
+    if (state.merge.files.length < 1) return;
+    
+    showProgress('Creating Preview', 'Compiling document in memory...', 20);
+    try {
+      const { PDFDocument } = PDFLib;
+      const mergedPdf = await PDFDocument.create();
+
+      for (let i = 0; i < state.merge.files.length; i++) {
+        const file = state.merge.files[i];
+        updateProgress(20 + Math.round((i / state.merge.files.length) * 60), `Processing document: ${file.name}`);
+        const srcPdf = await PDFDocument.load(file.data, { ignoreEncryption: true });
+        const indices = srcPdf.getPageIndices();
+        const copiedPages = await mergedPdf.copyPages(srcPdf, indices);
+        copiedPages.forEach(page => mergedPdf.addPage(page));
+      }
+
+      updateProgress(90, 'Opening preview viewer...');
+      const mergedPdfBytes = await mergedPdf.save();
+      const previewResult = await window.api.previewPdf(mergedPdfBytes);
+
+      hideProgress();
+      if (!previewResult.success) {
+        showToast(`Preview error: ${previewResult.error}`, 'error');
+      }
+    } catch (err) {
+      console.error(err);
+      hideProgress();
+      showToast(`Preview failed: ${err.message}`, 'error');
+    }
+  });
+}
 
 btnRunMerge.addEventListener('click', async () => {
   if (state.merge.files.length < 2) {
@@ -308,7 +431,7 @@ btnRunMerge.addEventListener('click', async () => {
       const file = state.merge.files[i];
       updateProgress(20 + Math.round((i / state.merge.files.length) * 60), `Processing document: ${file.name}`);
 
-      const srcPdf = await PDFDocument.load(file.data);
+      const srcPdf = await PDFDocument.load(file.data, { ignoreEncryption: true });
       const indices = srcPdf.getPageIndices();
       const copiedPages = await mergedPdf.copyPages(srcPdf, indices);
       
@@ -366,9 +489,9 @@ async function handleSplitFile(files) {
   showProgress('Loading PDF', 'Reading document properties...', 20);
 
   try {
-    const arrayBuffer = await readFileAsArrayBuffer(pdfFile);
+    const arrayBuffer = await loadSafePdfBuffer(pdfFile);
     const { PDFDocument } = PDFLib;
-    const pdfDoc = await PDFDocument.load(arrayBuffer);
+    const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
     const pageCount = pdfDoc.getPageCount();
 
     state.split.file = {
@@ -485,7 +608,7 @@ btnRunSplit.addEventListener('click', async () => {
     showProgress('Extracting Pages', 'Processing locally in memory...', 30);
 
     try {
-      const srcPdf = await PDFDocument.load(state.split.file.data);
+      const srcPdf = await PDFDocument.load(state.split.file.data, { ignoreEncryption: true });
       const destPdf = await PDFDocument.create();
 
       const copiedPages = await destPdf.copyPages(srcPdf, targetIndices);
@@ -525,7 +648,7 @@ btnRunSplit.addEventListener('click', async () => {
     showProgress('Splitting PDF', 'Loading source file...', 10);
 
     try {
-      const srcPdf = await PDFDocument.load(state.split.file.data);
+      const srcPdf = await PDFDocument.load(state.split.file.data, { ignoreEncryption: true });
       const totalPages = state.split.file.pageCount;
 
       for (let i = 0; i < totalPages; i++) {
@@ -818,9 +941,9 @@ async function handleCompressFile(files) {
   showProgress('Loading PDF', 'Analyzing document size...', 20);
 
   try {
-    const arrayBuffer = await readFileAsArrayBuffer(file);
+    const arrayBuffer = await loadSafePdfBuffer(file);
     const { PDFDocument } = PDFLib;
-    const pdfDoc = await PDFDocument.load(arrayBuffer);
+    const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
     const pageCount = pdfDoc.getPageCount();
 
     state.compress.file = {
@@ -942,7 +1065,7 @@ async function handlePdfToImgFile(files) {
   showProgress('Loading PDF', 'Reading document pages for preview...', 10);
 
   try {
-    const arrayBuffer = await readFileAsArrayBuffer(file);
+    const arrayBuffer = await loadSafePdfBuffer(file);
     state.pdfToImg.file = {
       name: file.name,
       size: file.size,
@@ -1001,7 +1124,7 @@ async function handlePdfToImgFile(files) {
 async function renderThumbnail(pdf, pageNum, canvas) {
   try {
     const page = await pdf.getPage(pageNum);
-    const viewport = page.getViewport({ scale: 0.35 });
+    const viewport = page.getViewport({ scale: 0.8 });
     const context = canvas.getContext('2d');
     canvas.height = viewport.height;
     canvas.width = viewport.width;
@@ -1011,10 +1134,73 @@ async function renderThumbnail(pdf, pageNum, canvas) {
   }
 }
 
-function updateSelectedPagesCount() {
+function updateSelectedPagesCount(skipInputUpdate = false) {
   const selectedCount = state.pdfToImg.pages.filter(p => p.selected).length;
   countPdfToImg.textContent = selectedCount;
+
+  if (!skipInputUpdate) {
+    const pages = state.pdfToImg.pages;
+    const selected = pages.filter(p => p.selected).map(p => p.pageNum).sort((a, b) => a - b);
+    let str = '';
+    if (selected.length === 0) str = '';
+    else if (selected.length === pages.length) str = 'All';
+    else {
+      let ranges = [];
+      let start = selected[0];
+      let end = selected[0];
+      for (let i = 1; i < selected.length; i++) {
+        if (selected[i] === end + 1) {
+          end = selected[i];
+        } else {
+          ranges.push(start === end ? `${start}` : `${start}-${end}`);
+          start = selected[i];
+          end = selected[i];
+        }
+      }
+      ranges.push(start === end ? `${start}` : `${start}-${end}`);
+      str = ranges.join(', ');
+    }
+    const inputField = document.getElementById('pdf-to-img-ranges');
+    if (inputField) inputField.value = str;
+  }
 }
+
+const rangesInputPdfToImg = document.getElementById('pdf-to-img-ranges');
+if (rangesInputPdfToImg) {
+  rangesInputPdfToImg.addEventListener('input', (e) => {
+    const val = e.target.value.trim().toLowerCase();
+    if (!state.pdfToImg.pages || state.pdfToImg.pages.length === 0) return;
+    const maxPages = state.pdfToImg.pages.length;
+    
+    if (val === 'all') {
+      state.pdfToImg.pages.forEach(p => p.selected = true);
+    } else if (val === '') {
+      state.pdfToImg.pages.forEach(p => p.selected = false);
+    } else {
+      try {
+        const parsedIndices = parsePageRanges(e.target.value, maxPages);
+        state.pdfToImg.pages.forEach((p, idx) => {
+          p.selected = parsedIndices.includes(idx);
+        });
+      } catch (err) {
+         // Silently ignore while typing invalid characters (like trailing hyphen)
+         return;
+      }
+    }
+
+    // Visually update the cards without breaking typing
+    document.querySelectorAll('#grid-pdf-to-img .page-item-card').forEach((card, idx) => {
+      if (state.pdfToImg.pages[idx].selected) {
+        card.classList.add('selected');
+      } else {
+        card.classList.remove('selected');
+      }
+    });
+
+    updateSelectedPagesCount(true);
+  });
+}
+
 
 btnSelectAllPdfToImg.addEventListener('click', () => {
   state.pdfToImg.pages.forEach(p => p.selected = true);

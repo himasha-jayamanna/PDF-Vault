@@ -12,7 +12,8 @@
   --color-text-main: #F1F5F9;
   --color-text-muted: #94A3B8;
   --glow-shadow: 0 0 20px rgba(6, 182, 212, 0.15);
-  --font-family: 'Plus Jakarta Sans', 'Outfit', sans-serif;
+  --font-family: 'Nunito', sans-serif;
+  --font-heading: 'Poppins', sans-serif;
   --transition-speed: 0.25s;
 }
 
@@ -21,6 +22,10 @@
   padding: 0;
   box-sizing: border-box;
   user-select: none;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
 }
 
 body {
@@ -47,6 +52,11 @@ body {
   flex-direction: column;
   padding: 24px;
   flex-shrink: 0;
+  transition: margin-left var(--transition-speed) ease;
+}
+
+.sidebar.collapsed {
+  margin-left: -280px;
 }
 
 .brand {
@@ -74,20 +84,25 @@ body {
 }
 
 .brand-text h1 {
-  font-size: 1.15rem;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  background: linear-gradient(to right, #ffffff, #CBD5E1);
+  font-family: var(--font-heading);
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  background: linear-gradient(135deg, #ffffff 30%, var(--color-primary));
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
 .brand-text span {
-  font-size: 0.75rem;
-  color: var(--color-primary);
-  font-weight: 500;
+  font-family: var(--font-family);
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 1.5px;
+  display: block;
+  margin-top: -2px;
 }
 
 .nav-menu {
@@ -697,8 +712,8 @@ body {
 
 .image-preview-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 20px;
   overflow-y: auto;
   flex-grow: 1;
   padding-right: 4px;
@@ -974,8 +989,9 @@ body.light-theme {
 
 /* Specific Light Theme Overrides */
 body.light-theme .brand-text h1 {
-  background: linear-gradient(to right, #0F172A, #334155);
+  background: linear-gradient(135deg, #0F172A 30%, var(--color-primary));
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
@@ -1121,8 +1137,8 @@ body.light-theme ::-webkit-scrollbar-thumb:hover {
 /* PDF to Image Page Selection Grid */
 .page-item-card {
   position: relative;
-  aspect-ratio: 1 / 1.414; /* Standard PDF page ratio */
-  min-height: 170px; /* Prevents aspect-ratio collapse to 0 height in grid cells */
+  width: 100%;
+  padding-bottom: 141.4%; /* Perfect aspect ratio hack */
   background: #ffffff; /* Page background is white */
   border: 1.5px solid var(--border-color);
   border-radius: 10px;
@@ -1143,6 +1159,9 @@ body.light-theme ::-webkit-scrollbar-thumb:hover {
 }
 
 .page-item-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;

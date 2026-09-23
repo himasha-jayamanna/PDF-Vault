@@ -4,17 +4,23 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PDF Vault</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Local fonts: No external network calls -->
+  <link rel="stylesheet" href="node_modules/@fontsource/poppins/index.css">
+  <link rel="stylesheet" href="node_modules/@fontsource/nunito/index.css">
   <link rel="stylesheet" href="styles.css">
   <!-- Load local pdf-lib from node_modules -->
   <script src="node_modules/pdf-lib/dist/pdf-lib.min.js"></script>
+  <!-- Our bundled decryption library -->
+  <script src="browser-decrypt.js"></script>
   <!-- Load local pdfjs-dist from node_modules -->
   <script src="node_modules/pdfjs-dist/build/pdf.min.js"></script>
 </head>
 <body>
-  <div class="app-container">
+  <div class="app-container" style="position: relative;">
+    <button id="sidebar-toggle" style="position: absolute; top: 12px; left: 240px; z-index: 100; background: var(--bg-card); border: 1px solid var(--border-color); color: var(--color-text-main); cursor: pointer; padding: 6px; border-radius: 6px; display: flex; align-items: center; justify-content: center; transition: left var(--transition-speed) ease, transform 0.2s ease;">
+      <svg id="sidebar-toggle-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transition: transform var(--transition-speed) ease;"><path d="m15 18-6-6 6-6"/></svg>
+    </button>
+
     <!-- Sidebar Navigation -->
     <aside class="sidebar">
       <div class="brand">
@@ -66,6 +72,11 @@
           <p>No internet required. Files never leave your device.</p>
         </div>
       </div>
+
+      <div class="app-info-footer" style="margin-top: 16px; text-align: center; font-size: 0.6rem; color: var(--color-text-muted); padding-bottom: 4px; line-height: 1.4; opacity: 0.6; display: flex; flex-direction: column; gap: 2px;">
+        <div style="font-weight: 600; font-size: 0.65rem; color: var(--color-primary); letter-spacing: 0.5px;">Version <span id="app-version">1.0.0</span></div>
+        <div>Developed by AI Team - IT Department</div>
+      </div>
     </aside>
 
     <!-- Main Content Workspace -->
@@ -75,10 +86,6 @@
         <div class="header-title">
           <h2 id="current-tool-title">Merge PDF Documents</h2>
           <p id="current-tool-desc">Combine multiple PDF files in any order you choose.</p>
-        </div>
-        <div class="status-indicator">
-          <span class="pulse-dot"></span>
-          <span class="status-text">Engine Ready (Offline)</span>
         </div>
       </header>
 
@@ -118,6 +125,11 @@
                 <label for="merge-filename">Output Filename</label>
                 <input type="text" id="merge-filename" value="merged_document.pdf" placeholder="document.pdf">
               </div>
+
+              <button class="btn btn-secondary w-full" id="btn-preview-merge" style="margin-bottom: 12px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3);">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                Preview Document
+              </button>
 
               <button class="btn btn-primary w-full" id="btn-run-merge">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
@@ -370,6 +382,12 @@
                   <option value="png">PNG (Lossless, transparent)</option>
                   <option value="jpeg" selected>JPEG (High compression, white bg)</option>
                 </select>
+              </div>
+
+              <div class="form-group">
+                <label for="pdf-to-img-ranges">Selected Pages</label>
+                <input type="text" id="pdf-to-img-ranges" value="All" placeholder="e.g. 1-5, 8, 11-13">
+                <span class="form-help">Type ranges or click pages on the left to select</span>
               </div>
 
               <div class="form-group">

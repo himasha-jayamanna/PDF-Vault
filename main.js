@@ -13,7 +13,8 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      sandbox: true
     },
     titleBarStyle: 'default',
     autoHideMenuBar: true, // Hides the menu bar for a cleaner UI
@@ -21,6 +22,10 @@ function createWindow() {
   });
 
   mainWindow.loadFile('index.html');
+  
+  mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    console.log(`[Renderer] ${message} (line ${line} in ${sourceId})`);
+  });
 }
 
 app.whenReady().then(() => {
@@ -55,6 +60,21 @@ ipcMain.handle('show-directory-dialog', async (event, options) => {
   return result;
 });
 
+const { shell } = require('electron');
+const os = require('node:os');
+
+ipcMain.handle('preview-pdf', async (event, arrayBuffer) => {
+  try {
+    const tempPath = path.join(os.tmpdir(), `preview_${Date.now()}.pdf`);
+    await fs.writeFile(tempPath, Buffer.from(arrayBuffer));
+    await shell.openPath(tempPath);
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to preview file:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('save-file', async (event, { filePath, arrayBuffer }) => {
   try {
     const buffer = Buffer.from(arrayBuffer);
@@ -65,3 +85,5 @@ ipcMain.handle('save-file', async (event, { filePath, arrayBuffer }) => {
     return { success: false, error: error.message };
   }
 });
+
+ipcMain.handle('get-app-version', () => app.getVersion());
