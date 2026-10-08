@@ -1,16 +1,16 @@
 # PDF Vault 🛠️
 
-PDF Vault is a secure, 100% offline desktop application designed to perform essential PDF manipulations entirely in memory on your local machine. Developed with privacy in mind, your sensitive documents never leave your computer.
+PDF Vault is a secure, 100% offline desktop application designed to perform essential PDF manipulations entirely in memory on your local machine. Developed with privacy and enterprise patch management in mind, your sensitive documents never leave your computer.
 
 ## Features
 
-- **Merge PDFs**: Select multiple PDF documents, view their individual page counts, drag-and-drop or use navigation buttons to adjust their sequence, and compile them into a single merged PDF.
+- **Merge PDFs**: Select multiple PDF documents, view their individual page counts, and seamlessly drag-and-drop elements around to adjust their sequence before compiling them into a single merged PDF.
+- **Images to PDF**: Convert JPG and PNG images into a clean PDF document. Features a smart visual grid layout where images can be intuitively re-ordered via HTML5 drag-and-drop.
 - **Split PDF**: Extract specific page ranges (e.g., `1-3, 5`) or separate every single page into separate files.
-- **Compress PDF**: Optimize your PDF files using local smart image re-compression presets (Recommended, Extreme, or Less Compression) without losing vector text clarity or searchability.
-- **PDF to Image**: Convert selected pages of a PDF document into high-fidelity image formats (PNG/JPEG) with three resolution presets: High Quality (150 DPI), Ultra Quality (300 DPI), and Standard Quality (72 DPI).
-- **Images to PDF**: Convert JPG and PNG images into a clean PDF document, with custom page size options (A4, Letter, Fit to image), orientation settings (Portrait/Landscape), and page margins.
-- **Light & Dark Themes**: Modern glassmorphic user interface with instant Light/Dark mode toggling and local persistent memory.
-- **100% Private & Free**: Runs purely client-side. Zero hosting cost, zero usage limits, zero API keys, no internet required.
+- **Compress PDF**: Optimize your PDF files using local smart image re-compression presets without losing vector text clarity or searchability.
+- **PDF to Image**: Convert selected pages of a PDF document into high-fidelity image formats (PNG/JPEG). Enjoy a visual grid selection UI combined with smart textual range inputs.
+- **Smart Decryption Engine 🔓**: Easily merge or convert "locked" / permission-restricted files (e.g., CRIB Reports). PDF Vault automatically unbinds restrictions silently in the background.
+- **Light & Dark Themes**: Modern glassmorphic user interface paired with premium typography (Poppins & Nunito) with instant Light/Dark mode toggling.
 
 ---
 
@@ -45,19 +45,20 @@ npm run build
 ```
 You can access the unpacked folder at `dist/win-unpacked/` and run `PDF Vault.exe` directly.
 
-### 2. Packaging Setup Installer (`.exe` Installer Setup Wizard)
-Before compiling the installer package on Windows, ensure **Developer Mode** is turned on in your Windows Settings (or run your command line shell as **Administrator**):
+### 2. Packaging Setup Installers (`.exe` & `.msi` Enterprise Wizards)
+This command packages the final application for end-users. **Crucially, it generates both an `.exe` and a Patch-Management compliant `.msi` file targeting perMachine (All Users) silent deployment.**
 ```bash
 npm run package
 ```
-This generates the installation wizard `PDF Vault Setup 1.0.0.exe` in the `dist/` directory.
+This generates the installers `PDF Vault Setup 1.2.3.exe` and `PDF Vault Setup 1.2.3.msi` in the `dist/` directory.
 
 ---
 
 ## Technical Architecture
 
-- **Shell**: Electron Framework
+- **Shell**: Electron Framework (v31.x)
 - **PDF Manipulation Engine**: `pdf-lib` & `pdfjs-dist` (pure JavaScript PDF parser and writer)
+- **Decryption**: Built-in `@pdfsmaller/pdf-decrypt` capability
 - **Compressor**: `@quicktoolsone/pdf-compress` (client-side image XObject re-compression)
 - **UI Framework**: Vanilla HTML5, CSS3 Variables, ES6 JavaScript
 - **Security**: Context Isolation enabled, sandboxed renderer process (no remote Node integration in client UI).
