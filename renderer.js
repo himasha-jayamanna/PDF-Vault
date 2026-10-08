@@ -220,6 +220,11 @@ function setupDragAndDrop(zone, input, handler) {
   zone.addEventListener('drop', (e) => {
     e.preventDefault();
     const dt = e.dataTransfer;
+    if (dt && dt.types) {
+      // Ignore if this is an internal drag from the UI (reordering items)
+      if (Array.from(dt.types).includes('application/pdf-vault-internal')) return;
+    }
+    
     if (dt && dt.files && dt.files.length > 0) {
       const actualFiles = Array.from(dt.files).filter(f => f.name);
       if (actualFiles.length > 0) {
@@ -314,6 +319,7 @@ function renderMergeList() {
     li.addEventListener('dragstart', (e) => {
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', index);
+      e.dataTransfer.setData('application/pdf-vault-internal', 'true');
       li.classList.add('dragging');
       setTimeout(() => li.style.opacity = '0.5', 0);
     });
@@ -478,6 +484,7 @@ const btnClearSplit = document.getElementById('btn-clear-split');
 const btnRunSplit = document.getElementById('btn-run-split');
 
 setupDragAndDrop(dropZoneSplit, fileInputSplit, handleSplitFile);
+setupDragAndDrop(workspaceSplit, fileInputSplit, handleSplitFile);
 
 async function handleSplitFile(files) {
   const pdfFile = Array.from(files)[0];
@@ -694,6 +701,7 @@ const btnAddMoreImg = document.getElementById('btn-add-more-img');
 const fileInputAddMoreImg = document.getElementById('file-input-add-more-img');
 
 setupDragAndDrop(dropZoneImg, fileInputImg, handleImageFiles);
+setupDragAndDrop(workspaceImg, fileInputAddMoreImg, handleImageFiles);
 
 // Add more images listeners
 btnAddMoreImg.addEventListener('click', () => fileInputAddMoreImg.click());
@@ -775,6 +783,51 @@ function renderImageGrid() {
     card.querySelector('.btn-move-left').addEventListener('click', () => swapImgItems(index, index - 1));
     card.querySelector('.btn-move-right').addEventListener('click', () => swapImgItems(index, index + 1));
     card.querySelector('.btn-delete-card').addEventListener('click', () => deleteImgItem(index));
+
+    // HTML5 Drag and Drop Handlers
+    card.draggable = true;
+    card.style.cursor = 'grab';
+    card.dataset.index = index;
+
+    card.addEventListener('dragstart', (e) => {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', index);
+      e.dataTransfer.setData('application/pdf-vault-internal', 'true');
+      card.classList.add('dragging');
+      setTimeout(() => card.style.opacity = '0.5', 0);
+    });
+
+    card.addEventListener('dragend', () => {
+      card.classList.remove('dragging');
+      card.style.opacity = '1';
+    });
+
+    card.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const draggingItem = gridImg.querySelector('.dragging');
+      if (draggingItem && draggingItem !== card) {
+        card.style.border = '2px dashed var(--color-primary)';
+      }
+    });
+
+    card.addEventListener('dragleave', () => {
+      card.style.border = '';
+    });
+
+    card.addEventListener('drop', (e) => {
+      e.preventDefault();
+      card.style.border = '';
+      const draggedIndex = parseInt(e.dataTransfer.getData('text/plain'));
+      const targetIndex = index;
+
+      if (!isNaN(draggedIndex) && draggedIndex !== targetIndex) {
+        const draggedFile = state.imgToPdf.files[draggedIndex];
+        state.imgToPdf.files.splice(draggedIndex, 1);
+        state.imgToPdf.files.splice(targetIndex, 0, draggedFile);
+        renderImageGrid();
+      }
+    });
 
     gridImg.appendChild(card);
   });
@@ -930,6 +983,7 @@ const btnRunCompress = document.getElementById('btn-run-compress');
 const compressModeCards = document.querySelectorAll('.compress-mode-selection .mode-card');
 
 setupDragAndDrop(dropZoneCompress, fileInputCompress, handleCompressFile);
+setupDragAndDrop(workspaceCompress, fileInputCompress, handleCompressFile);
 
 async function handleCompressFile(files) {
   const file = Array.from(files)[0];
@@ -1054,6 +1108,7 @@ const btnClearPdfToImg = document.getElementById('btn-clear-pdf-to-img');
 const btnRunPdfToImg = document.getElementById('btn-run-pdf-to-img');
 
 setupDragAndDrop(dropZonePdfToImg, fileInputPdfToImg, handlePdfToImgFile);
+setupDragAndDrop(workspacePdfToImg, fileInputPdfToImg, handlePdfToImgFile);
 
 async function handlePdfToImgFile(files) {
   const file = Array.from(files)[0];

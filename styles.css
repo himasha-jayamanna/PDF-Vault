@@ -69,12 +69,10 @@ body {
 .brand-logo {
   width: 42px;
   height: 42px;
-  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
   border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 15px rgba(6, 182, 212, 0.3);
 }
 
 .logo-icon {
