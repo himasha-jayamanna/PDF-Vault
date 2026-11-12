@@ -8,3 +8,6 @@ yarn-error.log*
 .idea/
 .vscode/
 package-lock.json
+
+# Local documentation & chat history
+docs/

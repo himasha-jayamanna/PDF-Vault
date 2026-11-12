@@ -8,7 +8,11 @@ const state = {
   },
   split: {
     file: null,
-    mode: 'range' // 'range' or 'all'
+    mode: 'range', // 'range' or 'all'
+    pages: [], // list of: { pageNum, selected }
+    pdfJsDoc: null,
+    observer: null,
+    previewPageNum: null
   },
   imgToPdf: {
     files: []
@@ -96,14 +100,15 @@ navItems.forEach(item => {
   });
 });
 
-// Toast Helper
+// Toast Helper (uses textContent to prevent HTML/XSS injection from filenames or error messages)
 function showToast(message, type = 'success') {
   const container = document.getElementById('toast-container');
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
-  toast.innerHTML = `
-    <span class="toast-message">${message}</span>
-  `;
+  const span = document.createElement('span');
+  span.className = 'toast-message';
+  span.textContent = String(message);
+  toast.appendChild(span);
   container.appendChild(toast);
 
   // Automatically remove after 3.5 seconds
@@ -145,6 +150,42 @@ function sanitizeText(str) {
   const div = document.createElement('div');
   div.textContent = String(str);
   return div.innerHTML;
+}
+
+// Security: Strip path separators, traversal sequences, and illegal Windows filename chars.
+function sanitizeFilename(name, fallback = 'output') {
+  const cleaned = String(name || '')
+    .replace(/\.\.+/g, '.')
+    .replace(/[\\/:*?"<>|\x00-\x1f]/g, '_')
+    .replace(/^\.+|\.+$/g, '')
+    .trim();
+  return cleaned || fallback;
+}
+
+// Security: Load PDF via PDF.js with JS eval disabled (mitigates GHSA-wgrm-67xf-hhpq).
+function loadPdfJsDocument(arrayBuffer) {
+  return pdfjsLib.getDocument({
+    data: new Uint8Array(arrayBuffer.slice(0)),
+    isEvalSupported: false
+  }).promise;
+}
+
+// Shared helper: compiles an in-memory PDF via buildPdfBytesFn and opens it in the system preview viewer.
+async function openGeneratedPdfPreview(buildPdfBytesFn) {
+  showProgress('Creating Preview', 'Compiling document in memory...', 20);
+  try {
+    const pdfBytes = await buildPdfBytesFn();
+    updateProgress(90, 'Opening preview viewer...');
+    const previewResult = await window.api.previewPdf(pdfBytes);
+    hideProgress();
+    if (!previewResult.success) {
+      showToast(`Preview error: ${previewResult.error}`, 'error');
+    }
+  } catch (err) {
+    console.error(err);
+    hideProgress();
+    showToast(`Preview failed: ${err.message}`, 'error');
+  }
 }
 
 // Read file helper
@@ -198,9 +239,8 @@ const fileInputAddMoreMerge = document.getElementById('file-input-add-more-merge
 setupDragAndDrop(dropZoneMerge, fileInputMerge, handleMergeFiles);
 setupDragAndDrop(workspaceMerge, fileInputAddMoreMerge, handleMergeFiles);
 
-// Add more files listeners
+// Add more files listener (change listener is already bound safely inside setupDragAndDrop)
 btnAddMoreMerge.addEventListener('click', () => fileInputAddMoreMerge.click());
-fileInputAddMoreMerge.addEventListener('change', (e) => handleMergeFiles(e.target.files));
 
 function setupDragAndDrop(zone, input, handler) {
   ['dragenter', 'dragover'].forEach(eventName => {
@@ -233,9 +273,17 @@ function setupDragAndDrop(zone, input, handler) {
     }
   });
 
-  input.addEventListener('change', (e) => {
-    handler(e.target.files);
-  });
+  // Guard against binding multiple change listeners when the same input is shared across dropZone & workspace
+  if (input && !input.dataset.dndChangeBound) {
+    input.dataset.dndChangeBound = 'true';
+    input.addEventListener('change', (e) => {
+      const selectedFiles = Array.from(e.target.files || []);
+      e.target.value = '';
+      if (selectedFiles.length > 0) {
+        handler(selectedFiles);
+      }
+    });
+  }
 }
 
 async function handleMergeFiles(files) {
@@ -373,11 +421,10 @@ btnClearMerge.addEventListener('click', () => {
 
 const btnPreviewMerge = document.getElementById('btn-preview-merge');
 if (btnPreviewMerge) {
-  btnPreviewMerge.addEventListener('click', async () => {
+  btnPreviewMerge.addEventListener('click', () => {
     if (state.merge.files.length < 1) return;
-    
-    showProgress('Creating Preview', 'Compiling document in memory...', 20);
-    try {
+
+    openGeneratedPdfPreview(async () => {
       const { PDFDocument } = PDFLib;
       const mergedPdf = await PDFDocument.create();
 
@@ -385,24 +432,12 @@ if (btnPreviewMerge) {
         const file = state.merge.files[i];
         updateProgress(20 + Math.round((i / state.merge.files.length) * 60), `Processing document: ${file.name}`);
         const srcPdf = await PDFDocument.load(file.data, { ignoreEncryption: true });
-        const indices = srcPdf.getPageIndices();
-        const copiedPages = await mergedPdf.copyPages(srcPdf, indices);
+        const copiedPages = await mergedPdf.copyPages(srcPdf, srcPdf.getPageIndices());
         copiedPages.forEach(page => mergedPdf.addPage(page));
       }
 
-      updateProgress(90, 'Opening preview viewer...');
-      const mergedPdfBytes = await mergedPdf.save();
-      const previewResult = await window.api.previewPdf(mergedPdfBytes);
-
-      hideProgress();
-      if (!previewResult.success) {
-        showToast(`Preview error: ${previewResult.error}`, 'error');
-      }
-    } catch (err) {
-      console.error(err);
-      hideProgress();
-      showToast(`Preview failed: ${err.message}`, 'error');
-    }
+      return mergedPdf.save();
+    });
   });
 }
 
@@ -469,6 +504,62 @@ btnRunMerge.addEventListener('click', async () => {
 
 
 // ==========================================
+// SHARED PAGE RANGE & THUMBNAIL HELPERS
+// ==========================================
+
+/** Formats sorted 1-based page numbers into compact range notation (e.g. "1-3, 5"). */
+function formatPageRanges(selectedPageNums, totalPages, useAllKeyword = false) {
+  if (!selectedPageNums || selectedPageNums.length === 0) return '';
+  if (useAllKeyword && selectedPageNums.length === totalPages) return 'All';
+
+  const sorted = [...selectedPageNums].sort((a, b) => a - b);
+  const ranges = [];
+  let start = sorted[0];
+  let end = sorted[0];
+
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i] === end + 1) {
+      end = sorted[i];
+    } else {
+      ranges.push(start === end ? `${start}` : `${start}-${end}`);
+      start = sorted[i];
+      end = sorted[i];
+    }
+  }
+  ranges.push(start === end ? `${start}` : `${start}-${end}`);
+  return ranges.join(', ');
+}
+
+/** Lazily renders PDF thumbnails as cards enter the scrollable grid viewport. */
+function setupLazyThumbnailObserver(gridEl, pdfJsDoc, scale = 0.5) {
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      const card = entry.target;
+      if (card.dataset.rendered === 'true') {
+        observer.unobserve(card);
+        return;
+      }
+      card.dataset.rendered = 'true';
+      observer.unobserve(card);
+      const pageNum = parseInt(card.getAttribute('data-page'), 10);
+      const canvas = card.querySelector('canvas');
+      if (canvas && !isNaN(pageNum)) {
+        renderThumbnail(pdfJsDoc, pageNum, canvas, scale);
+      }
+    });
+  }, {
+    root: gridEl,
+    rootMargin: '250px 0px',
+    threshold: 0.01
+  });
+
+  gridEl.querySelectorAll('.page-item-card').forEach((card) => observer.observe(card));
+  return observer;
+}
+
+
+// ==========================================
 // 2. PDF SPLIT FEATURE
 // ==========================================
 const dropZoneSplit = document.getElementById('drop-zone-split');
@@ -477,14 +568,220 @@ const workspaceSplit = document.getElementById('workspace-split');
 const splitFilename = document.getElementById('split-filename');
 const splitFilesize = document.getElementById('split-filesize');
 const splitPagecount = document.getElementById('split-pagecount');
+const countSplit = document.getElementById('count-split');
+const gridSplit = document.getElementById('grid-split');
+const splitRangesInput = document.getElementById('split-ranges');
 const modeCards = document.querySelectorAll('.split-mode-selection .mode-card');
 const splitSettingsRange = document.getElementById('split-settings-range');
 const splitSettingsAll = document.getElementById('split-settings-all');
+const btnSelectAllSplit = document.getElementById('btn-select-all-split');
+const btnDeselectAllSplit = document.getElementById('btn-deselect-all-split');
 const btnClearSplit = document.getElementById('btn-clear-split');
+const btnPreviewSplit = document.getElementById('btn-preview-split');
 const btnRunSplit = document.getElementById('btn-run-split');
+
+// In-App Page Zoom Preview Modal Elements
+const pagePreviewModal = document.getElementById('page-preview-modal');
+const pagePreviewCanvas = document.getElementById('page-preview-canvas');
+const pagePreviewIndicator = document.getElementById('page-preview-indicator');
+const btnPreviewPrev = document.getElementById('btn-preview-prev');
+const btnPreviewNext = document.getElementById('btn-preview-next');
+const btnPreviewToggleSelect = document.getElementById('btn-preview-toggle-select');
+const btnClosePreview = document.getElementById('btn-close-preview');
+let activePreviewRenderTask = null;
+let previewRenderSeq = 0;
 
 setupDragAndDrop(dropZoneSplit, fileInputSplit, handleSplitFile);
 setupDragAndDrop(workspaceSplit, fileInputSplit, handleSplitFile);
+
+function cleanupSplitResources() {
+  if (state.split.observer) {
+    state.split.observer.disconnect();
+    state.split.observer = null;
+  }
+  if (state.split.pdfJsDoc) {
+    state.split.pdfJsDoc.destroy().catch(() => {});
+    state.split.pdfJsDoc = null;
+  }
+  state.split.previewPageNum = null;
+  closePagePreview();
+}
+
+function updateSplitSelectionUI(skipInputUpdate = false) {
+  const pages = state.split.pages;
+  const selectedNums = pages.filter(p => p.selected).map(p => p.pageNum);
+  countSplit.textContent = selectedNums.length;
+
+  gridSplit.querySelectorAll('.page-item-card').forEach((card, idx) => {
+    if (pages[idx] && pages[idx].selected) {
+      card.classList.add('selected');
+    } else {
+      card.classList.remove('selected');
+    }
+  });
+
+  if (!skipInputUpdate && splitRangesInput) {
+    splitRangesInput.value = formatPageRanges(selectedNums, pages.length, false);
+  }
+}
+
+function createSplitPageCard(pageNum) {
+  const card = document.createElement('div');
+  card.className = 'page-item-card selected';
+  card.setAttribute('data-page', pageNum);
+  card.innerHTML = `
+    <canvas class="page-item-canvas"></canvas>
+    <button type="button" class="page-zoom-btn" title="Zoom & inspect page ${pageNum}">
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+    </button>
+    <div class="page-selection-overlay">
+      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+    </div>
+    <div class="page-number-badge">Page ${pageNum}</div>
+  `;
+
+  card.addEventListener('click', () => {
+    if (state.split.mode !== 'range') return;
+    const pageEntry = state.split.pages[pageNum - 1];
+    if (!pageEntry) return;
+    pageEntry.selected = !pageEntry.selected;
+    updateSplitSelectionUI();
+  });
+
+  card.addEventListener('dblclick', () => openPagePreview(pageNum));
+
+  const zoomBtn = card.querySelector('.page-zoom-btn');
+  zoomBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openPagePreview(pageNum);
+  });
+
+  return card;
+}
+
+function updatePreviewModalToggleBtn(pageNum) {
+  if (!btnPreviewToggleSelect) return;
+  if (state.split.mode !== 'range') {
+    btnPreviewToggleSelect.classList.add('hidden');
+    return;
+  }
+  btnPreviewToggleSelect.classList.remove('hidden');
+  const isSelected = Boolean(state.split.pages[pageNum - 1]?.selected);
+  btnPreviewToggleSelect.textContent = isSelected ? 'Selected ✓' : 'Select Page';
+  btnPreviewToggleSelect.classList.toggle('btn-primary', isSelected);
+  btnPreviewToggleSelect.classList.toggle('btn-secondary', !isSelected);
+}
+
+async function openPagePreview(pageNum) {
+  if (!state.split.pdfJsDoc || !state.split.file) return;
+  const seq = ++previewRenderSeq;
+  const totalPages = state.split.file.pageCount;
+  const clampedPage = Math.max(1, Math.min(pageNum, totalPages));
+  state.split.previewPageNum = clampedPage;
+
+  pagePreviewIndicator.textContent = `Page ${clampedPage} of ${totalPages}`;
+  btnPreviewPrev.disabled = clampedPage <= 1;
+  btnPreviewNext.disabled = clampedPage >= totalPages;
+  updatePreviewModalToggleBtn(clampedPage);
+  pagePreviewCanvas.dataset.renderedPage = '';
+  pagePreviewModal.classList.remove('hidden');
+
+  try {
+    if (activePreviewRenderTask) {
+      const prevTask = activePreviewRenderTask;
+      activePreviewRenderTask = null;
+      prevTask.cancel();
+      try {
+        await prevTask.promise;
+      } catch (_) {
+        // Expected RenderingCancelledException
+      }
+    }
+    if (seq !== previewRenderSeq || !state.split.pdfJsDoc) return;
+
+    const page = await state.split.pdfJsDoc.getPage(clampedPage);
+    if (seq !== previewRenderSeq || !state.split.pdfJsDoc) return;
+
+    const viewport = page.getViewport({ scale: 1.75 });
+    const ctx = pagePreviewCanvas.getContext('2d');
+    pagePreviewCanvas.width = viewport.width;
+    pagePreviewCanvas.height = viewport.height;
+
+    const renderTask = page.render({ canvasContext: ctx, viewport });
+    activePreviewRenderTask = renderTask;
+    await renderTask.promise;
+    if (activePreviewRenderTask === renderTask) {
+      activePreviewRenderTask = null;
+    }
+    if (seq === previewRenderSeq) {
+      pagePreviewCanvas.dataset.renderedPage = String(clampedPage);
+    }
+  } catch (err) {
+    if (err && err.name !== 'RenderingCancelledException') {
+      console.error('Failed to render preview page:', err);
+      showToast('Failed to render page preview.', 'error');
+    }
+  }
+}
+
+function closePagePreview() {
+  previewRenderSeq++;
+  if (activePreviewRenderTask) {
+    activePreviewRenderTask.cancel();
+    activePreviewRenderTask = null;
+  }
+  state.split.previewPageNum = null;
+  if (pagePreviewModal) {
+    pagePreviewModal.classList.add('hidden');
+  }
+}
+
+if (btnPreviewPrev) {
+  btnPreviewPrev.addEventListener('click', () => {
+    if (state.split.previewPageNum > 1) openPagePreview(state.split.previewPageNum - 1);
+  });
+}
+
+if (btnPreviewNext) {
+  btnPreviewNext.addEventListener('click', () => {
+    if (state.split.file && state.split.previewPageNum < state.split.file.pageCount) {
+      openPagePreview(state.split.previewPageNum + 1);
+    }
+  });
+}
+
+if (btnPreviewToggleSelect) {
+  btnPreviewToggleSelect.addEventListener('click', () => {
+    const pageNum = state.split.previewPageNum;
+    if (!pageNum || state.split.mode !== 'range') return;
+    const entry = state.split.pages[pageNum - 1];
+    if (!entry) return;
+    entry.selected = !entry.selected;
+    updateSplitSelectionUI();
+    updatePreviewModalToggleBtn(pageNum);
+  });
+}
+
+if (btnClosePreview) {
+  btnClosePreview.addEventListener('click', closePagePreview);
+}
+
+if (pagePreviewModal) {
+  pagePreviewModal.addEventListener('click', (e) => {
+    if (e.target === pagePreviewModal) closePagePreview();
+  });
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!pagePreviewModal || pagePreviewModal.classList.contains('hidden')) return;
+  if (e.key === 'Escape') {
+    closePagePreview();
+  } else if (e.key === 'ArrowLeft' && state.split.previewPageNum > 1) {
+    openPagePreview(state.split.previewPageNum - 1);
+  } else if (e.key === 'ArrowRight' && state.split.file && state.split.previewPageNum < state.split.file.pageCount) {
+    openPagePreview(state.split.previewPageNum + 1);
+  }
+});
 
 async function handleSplitFile(files) {
   const pdfFile = Array.from(files)[0];
@@ -493,7 +790,8 @@ async function handleSplitFile(files) {
     return;
   }
 
-  showProgress('Loading PDF', 'Reading document properties...', 20);
+  showProgress('Loading PDF', 'Reading document properties and preparing page previews...', 20);
+  cleanupSplitResources();
 
   try {
     const arrayBuffer = await loadSafePdfBuffer(pdfFile);
@@ -501,12 +799,25 @@ async function handleSplitFile(files) {
     const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
     const pageCount = pdfDoc.getPageCount();
 
+    updateProgress(55, 'Initializing page viewer...');
+    const pdfJsDoc = await loadPdfJsDocument(arrayBuffer);
+
     state.split.file = {
       name: pdfFile.name,
       size: pdfFile.size,
       data: arrayBuffer,
       pageCount: pageCount
     };
+    state.split.pdfJsDoc = pdfJsDoc;
+    state.split.pages = [];
+    gridSplit.innerHTML = '';
+
+    const fragment = document.createDocumentFragment();
+    for (let i = 1; i <= pageCount; i++) {
+      state.split.pages.push({ pageNum: i, selected: true });
+      fragment.appendChild(createSplitPageCard(i));
+    }
+    gridSplit.appendChild(fragment);
 
     splitFilename.textContent = pdfFile.name;
     splitFilesize.textContent = formatBytes(pdfFile.size);
@@ -515,13 +826,57 @@ async function handleSplitFile(files) {
 
     dropZoneSplit.classList.add('hidden');
     workspaceSplit.classList.remove('hidden');
+
+    updateSplitSelectionUI();
+    state.split.observer = setupLazyThumbnailObserver(gridSplit, pdfJsDoc, 0.5);
+
     hideProgress();
     showToast('PDF loaded successfully.');
   } catch (err) {
     console.error(err);
+    cleanupSplitResources();
     hideProgress();
     showToast('Failed to load PDF. Might be password protected.', 'error');
   }
+}
+
+if (splitRangesInput) {
+  splitRangesInput.addEventListener('input', (e) => {
+    if (!state.split.pages || state.split.pages.length === 0) return;
+    const val = e.target.value.trim().toLowerCase();
+    const maxPages = state.split.pages.length;
+
+    if (val === '') {
+      state.split.pages.forEach(p => { p.selected = false; });
+    } else {
+      try {
+        const parsedIndices = parsePageRanges(e.target.value, maxPages);
+        const indexSet = new Set(parsedIndices);
+        state.split.pages.forEach((p, idx) => {
+          p.selected = indexSet.has(idx);
+        });
+      } catch (err) {
+        // Ignore partial input (e.g. trailing comma or hyphen) while typing
+        return;
+      }
+    }
+
+    updateSplitSelectionUI(true);
+  });
+}
+
+if (btnSelectAllSplit) {
+  btnSelectAllSplit.addEventListener('click', () => {
+    state.split.pages.forEach(p => { p.selected = true; });
+    updateSplitSelectionUI();
+  });
+}
+
+if (btnDeselectAllSplit) {
+  btnDeselectAllSplit.addEventListener('click', () => {
+    state.split.pages.forEach(p => { p.selected = false; });
+    updateSplitSelectionUI();
+  });
 }
 
 // Mode selection toggle
@@ -536,27 +891,58 @@ modeCards.forEach(card => {
     if (mode === 'range') {
       splitSettingsRange.classList.remove('hidden');
       splitSettingsAll.classList.add('hidden');
+      gridSplit.classList.remove('split-all-mode');
+      btnSelectAllSplit.classList.remove('hidden');
+      btnDeselectAllSplit.classList.remove('hidden');
+      if (btnPreviewSplit) btnPreviewSplit.classList.remove('hidden');
+      updateSplitSelectionUI();
     } else {
       splitSettingsRange.classList.add('hidden');
       splitSettingsAll.classList.remove('hidden');
+      gridSplit.classList.add('split-all-mode');
+      btnSelectAllSplit.classList.add('hidden');
+      btnDeselectAllSplit.classList.add('hidden');
+      if (btnPreviewSplit) btnPreviewSplit.classList.add('hidden');
     }
   });
 });
 
 btnClearSplit.addEventListener('click', () => {
+  cleanupSplitResources();
   state.split.file = null;
+  state.split.pages = [];
+  gridSplit.innerHTML = '';
+  countSplit.textContent = '0';
+  if (splitRangesInput) splitRangesInput.value = '';
   workspaceSplit.classList.add('hidden');
   dropZoneSplit.classList.remove('hidden');
 });
 
-// Parse user range input (e.g. 1-3, 5, 8-10) to page index array (0-based)
-function parsePageRanges(rangeStr, maxPages) {
-  const indices = [];
-  const parts = rangeStr.replace(/\s+/g, '').split(',');
+/** Parses comma-separated range sections into { label, indices } groups (0-based indices). */
+function parsePageRangeGroups(rangeStr, maxPages) {
+  const trimmed = rangeStr.trim();
+  if (!trimmed) {
+    throw new Error('Please enter a page range.');
+  }
+  if (trimmed.toLowerCase() === 'all') {
+    return [{
+      label: maxPages === 1 ? '1' : `1-${maxPages}`,
+      indices: Array.from({ length: maxPages }, (_, i) => i)
+    }];
+  }
+
+  const parts = trimmed.replace(/\s+/g, '').split(',');
+  const groups = [];
 
   for (const part of parts) {
+    if (!part) {
+      throw new Error('Invalid empty range segment.');
+    }
     if (part.includes('-')) {
       const bounds = part.split('-');
+      if (bounds.length !== 2) {
+        throw new Error(`Invalid range: ${part}`);
+      }
       const start = parseInt(bounds[0], 10);
       const end = parseInt(bounds[1], 10);
 
@@ -566,33 +952,65 @@ function parsePageRanges(rangeStr, maxPages) {
 
       const min = Math.min(start, end);
       const max = Math.max(start, end);
-
+      const indices = [];
       for (let i = min; i <= max; i++) {
-        indices.push(i - 1); // convert to 0-based
+        indices.push(i - 1);
       }
+      groups.push({ label: min === max ? `${min}` : `${min}-${max}`, indices });
     } else {
       const page = parseInt(part, 10);
       if (isNaN(page) || page < 1 || page > maxPages) {
         throw new Error(`Invalid page number: ${part}`);
       }
-      indices.push(page - 1);
+      groups.push({ label: `${page}`, indices: [page - 1] });
     }
   }
 
-  // Deduplicate and sort indices
+  return groups;
+}
+
+// Parse user range input (e.g. 1-3, 5, 8-10, or 'all') to flat deduplicated 0-based index array
+function parsePageRanges(rangeStr, maxPages) {
+  const groups = parsePageRangeGroups(rangeStr, maxPages);
+  const indices = groups.flatMap(g => g.indices);
   return Array.from(new Set(indices)).sort((a, b) => a - b);
 }
 
-btnRunSplit.addEventListener('click', async () => {
-  if (!state.split.file) return;
+/** Exports an array of { filename, indices } PDF groups into a destination folder. */
+async function exportSplitGroupsToFolder(srcPdf, groups, folderPath) {
+  for (let i = 0; i < groups.length; i++) {
+    const group = groups[i];
+    const progress = 10 + Math.round((i / groups.length) * 80);
+    updateProgress(progress, `Saving file ${i + 1} of ${groups.length} (${group.filename})...`);
 
-  const baseName = document.getElementById('split-out-filename').value.trim();
+    const outPdf = await PDFDocumentHelperCopy(srcPdf, group.indices);
+    const bytes = await outPdf.save();
+    const saveResult = await window.api.saveFile({
+      filePath: `${folderPath}\\${group.filename}`,
+      arrayBuffer: bytes
+    });
+
+    if (!saveResult.success) {
+      throw new Error(saveResult.error || `Failed to save ${group.filename}`);
+    }
+  }
+}
+
+async function PDFDocumentHelperCopy(srcPdf, indices) {
   const { PDFDocument } = PDFLib;
+  const destPdf = await PDFDocument.create();
+  const copiedPages = await destPdf.copyPages(srcPdf, indices);
+  copiedPages.forEach(page => destPdf.addPage(page));
+  return destPdf;
+}
 
-  if (state.split.mode === 'range') {
+if (btnPreviewSplit) {
+  btnPreviewSplit.addEventListener('click', () => {
+    if (!state.split.file || state.split.mode !== 'range') return;
+
     const rangeInput = document.getElementById('split-ranges').value.trim();
     if (!rangeInput) {
-      showToast('Please enter a page range.', 'error');
+      showToast('Please select at least one page or enter a page range.', 'error');
       return;
     }
 
@@ -604,22 +1022,87 @@ btnRunSplit.addEventListener('click', async () => {
       return;
     }
 
-    const defaultFilename = `${baseName || 'extracted_pages'}.pdf`;
+    openGeneratedPdfPreview(async () => {
+      const { PDFDocument } = PDFLib;
+      const srcPdf = await PDFDocument.load(state.split.file.data, { ignoreEncryption: true });
+      const destPdf = await PDFDocumentHelperCopy(srcPdf, targetIndices);
+      return destPdf.save();
+    });
+  });
+}
+
+btnRunSplit.addEventListener('click', async () => {
+  if (!state.split.file) return;
+
+  const baseName = sanitizeFilename(document.getElementById('split-out-filename').value, 'split_document');
+  const { PDFDocument } = PDFLib;
+
+  if (state.split.mode === 'range') {
+    const rangeInput = document.getElementById('split-ranges').value.trim();
+    if (!rangeInput) {
+      showToast('Please enter a page range.', 'error');
+      return;
+    }
+
+    const separateFiles = Boolean(document.getElementById('split-separate-files')?.checked);
+
+    if (separateFiles) {
+      let groups;
+      try {
+        groups = parsePageRangeGroups(rangeInput, state.split.file.pageCount);
+      } catch (e) {
+        showToast(e.message, 'error');
+        return;
+      }
+
+      const folderDialogResult = await window.api.showDirectoryDialog({
+        title: 'Select Destination Folder for Split PDFs'
+      });
+      if (folderDialogResult.canceled || !folderDialogResult.filePaths || folderDialogResult.filePaths.length === 0) {
+        return;
+      }
+
+      const folderPath = folderDialogResult.filePaths[0];
+      showProgress('Splitting Sections', 'Processing locally in memory...', 10);
+
+      try {
+        const srcPdf = await PDFDocument.load(state.split.file.data, { ignoreEncryption: true });
+        const exportJobs = groups.map((g, idx) => ({
+          filename: `${baseName}_part_${idx + 1}_p${g.label}.pdf`,
+          indices: g.indices
+        }));
+        await exportSplitGroupsToFolder(srcPdf, exportJobs, folderPath);
+
+        hideProgress();
+        showToast(`Successfully split into ${exportJobs.length} PDF file(s)!`);
+      } catch (err) {
+        console.error(err);
+        hideProgress();
+        showToast(`Split failed: ${err.message}`, 'error');
+      }
+      return;
+    }
+
+    // Default behavior: merge selected pages into a single PDF
+    let targetIndices;
+    try {
+      targetIndices = parsePageRanges(rangeInput, state.split.file.pageCount);
+    } catch (e) {
+      showToast(e.message, 'error');
+      return;
+    }
+
     const dialogResult = await window.api.showSaveDialog({
       title: 'Save Extracted Pages',
-      defaultPath: defaultFilename
+      defaultPath: `${baseName}.pdf`
     });
-
     if (dialogResult.canceled || !dialogResult.filePath) return;
 
     showProgress('Extracting Pages', 'Processing locally in memory...', 30);
 
     try {
       const srcPdf = await PDFDocument.load(state.split.file.data, { ignoreEncryption: true });
-      const destPdf = await PDFDocument.create();
-
-      const copiedPages = await destPdf.copyPages(srcPdf, targetIndices);
-      copiedPages.forEach(page => destPdf.addPage(page));
+      const destPdf = await PDFDocumentHelperCopy(srcPdf, targetIndices);
 
       updateProgress(70, 'Compiling and saving...');
       const pdfBytes = await destPdf.save();
@@ -642,11 +1125,16 @@ btnRunSplit.addEventListener('click', async () => {
     }
 
   } else {
-    // Mode: Split All Pages
+    // Mode: Split All Pages / Fixed Page Interval
+    const chunkSize = parseInt(document.getElementById('split-fixed-count')?.value || '1', 10);
+    if (isNaN(chunkSize) || chunkSize < 1) {
+      showToast('Pages per PDF file must be at least 1.', 'error');
+      return;
+    }
+
     const folderDialogResult = await window.api.showDirectoryDialog({
       title: 'Select Destination Folder'
     });
-
     if (folderDialogResult.canceled || !folderDialogResult.filePaths || folderDialogResult.filePaths.length === 0) {
       return;
     }
@@ -657,31 +1145,38 @@ btnRunSplit.addEventListener('click', async () => {
     try {
       const srcPdf = await PDFDocument.load(state.split.file.data, { ignoreEncryption: true });
       const totalPages = state.split.file.pageCount;
+      const exportJobs = [];
 
-      for (let i = 0; i < totalPages; i++) {
-        const progress = 10 + Math.round((i / totalPages) * 80);
-        updateProgress(progress, `Saving page ${i + 1} of ${totalPages}...`);
-
-        const singlePagePdf = await PDFDocument.create();
-        const [copiedPage] = await singlePagePdf.copyPages(srcPdf, [i]);
-        singlePagePdf.addPage(copiedPage);
-
-        const bytes = await singlePagePdf.save();
-        const singleFileName = `${baseName}_page_${i + 1}.pdf`;
-        const fullPath = `${folderPath}\\${singleFileName}`;
-
-        await window.api.saveFile({
-          filePath: fullPath,
-          arrayBuffer: bytes
-        });
+      if (chunkSize === 1) {
+        for (let i = 0; i < totalPages; i++) {
+          exportJobs.push({
+            filename: `${baseName}_page_${i + 1}.pdf`,
+            indices: [i]
+          });
+        }
+      } else {
+        let partNum = 1;
+        for (let start = 0; start < totalPages; start += chunkSize) {
+          const end = Math.min(start + chunkSize, totalPages);
+          const indices = [];
+          for (let p = start; p < end; p++) indices.push(p);
+          const label = (start + 1 === end) ? `${end}` : `${start + 1}-${end}`;
+          exportJobs.push({
+            filename: `${baseName}_part_${partNum}_p${label}.pdf`,
+            indices
+          });
+          partNum++;
+        }
       }
 
+      await exportSplitGroupsToFolder(srcPdf, exportJobs, folderPath);
+
       hideProgress();
-      showToast(`Successfully split into ${totalPages} PDF files in folder!`);
+      showToast(`Successfully split into ${exportJobs.length} PDF file(s) in folder!`);
     } catch (err) {
       console.error(err);
       hideProgress();
-      showToast(`Failed to split all pages: ${err.message}`, 'error');
+      showToast(`Failed to split pages: ${err.message}`, 'error');
     }
   }
 });
@@ -703,9 +1198,8 @@ const fileInputAddMoreImg = document.getElementById('file-input-add-more-img');
 setupDragAndDrop(dropZoneImg, fileInputImg, handleImageFiles);
 setupDragAndDrop(workspaceImg, fileInputAddMoreImg, handleImageFiles);
 
-// Add more images listeners
+// Add more images listener (change listener is already bound safely inside setupDragAndDrop)
 btnAddMoreImg.addEventListener('click', () => fileInputAddMoreImg.click());
-fileInputAddMoreImg.addEventListener('change', (e) => handleImageFiles(e.target.files));
 
 async function handleImageFiles(files) {
   const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg'];
@@ -859,6 +1353,71 @@ const PAGE_SIZES = {
   US_Letter: { width: 612, height: 792 }
 };
 
+/** Compiles state.imgToPdf.files into PDF bytes using current page/orientation/margin settings. */
+async function buildImagesToPdfBytes() {
+  const pageSizeSetting = document.getElementById('img-page-size').value;
+  const orientationSetting = document.getElementById('img-orientation').value;
+  const marginSetting = document.getElementById('img-margin').value;
+
+  const { PDFDocument } = PDFLib;
+  const pdfDoc = await PDFDocument.create();
+
+  let margin = 0;
+  if (marginSetting === 'small') margin = 20;
+  if (marginSetting === 'large') margin = 40;
+
+  for (let i = 0; i < state.imgToPdf.files.length; i++) {
+    const imgFile = state.imgToPdf.files[i];
+    updateProgress(20 + Math.round((i / state.imgToPdf.files.length) * 65), `Processing image ${i + 1}...`);
+
+    let embeddedImage;
+    if (imgFile.type === 'image/png') {
+      embeddedImage = await pdfDoc.embedPng(imgFile.data);
+    } else {
+      embeddedImage = await pdfDoc.embedJpg(imgFile.data);
+    }
+
+    const imgWidth = embeddedImage.width;
+    const imgHeight = embeddedImage.height;
+
+    let pageWidth, pageHeight;
+    if (pageSizeSetting === 'Fit') {
+      pageWidth = imgWidth + margin * 2;
+      pageHeight = imgHeight + margin * 2;
+    } else {
+      const standardSize = PAGE_SIZES[pageSizeSetting];
+      if (orientationSetting === 'portrait') {
+        pageWidth = standardSize.width;
+        pageHeight = standardSize.height;
+      } else {
+        pageWidth = standardSize.height;
+        pageHeight = standardSize.width;
+      }
+    }
+
+    const page = pdfDoc.addPage([pageWidth, pageHeight]);
+    const maxDrawWidth = pageWidth - margin * 2;
+    const maxDrawHeight = pageHeight - margin * 2;
+    const scale = Math.min(maxDrawWidth / imgWidth, maxDrawHeight / imgHeight);
+    const drawWidth = imgWidth * scale;
+    const drawHeight = imgHeight * scale;
+    const x = margin + (maxDrawWidth - drawWidth) / 2;
+    const y = margin + (maxDrawHeight - drawHeight) / 2;
+
+    page.drawImage(embeddedImage, { x, y, width: drawWidth, height: drawHeight });
+  }
+
+  return pdfDoc.save();
+}
+
+const btnPreviewImg = document.getElementById('btn-preview-img');
+if (btnPreviewImg) {
+  btnPreviewImg.addEventListener('click', () => {
+    if (state.imgToPdf.files.length === 0) return;
+    openGeneratedPdfPreview(buildImagesToPdfBytes);
+  });
+}
+
 btnRunImg.addEventListener('click', async () => {
   if (state.imgToPdf.files.length === 0) return;
 
@@ -874,82 +1433,11 @@ btnRunImg.addEventListener('click', async () => {
 
   if (dialogResult.canceled || !dialogResult.filePath) return;
 
-  const pageSizeSetting = document.getElementById('img-page-size').value;
-  const orientationSetting = document.getElementById('img-orientation').value;
-  const marginSetting = document.getElementById('img-margin').value;
-
   showProgress('Creating PDF', 'Embedding images...', 10);
 
   try {
-    const { PDFDocument } = PDFLib;
-    const pdfDoc = await PDFDocument.create();
-
-    // Map margin
-    let margin = 0;
-    if (marginSetting === 'small') margin = 20;
-    if (marginSetting === 'large') margin = 40;
-
-    for (let i = 0; i < state.imgToPdf.files.length; i++) {
-      const imgFile = state.imgToPdf.files[i];
-      updateProgress(10 + Math.round((i / state.imgToPdf.files.length) * 70), `Processing image ${i + 1}...`);
-
-      // Embed image based on mime-type
-      let embeddedImage;
-      if (imgFile.type === 'image/png') {
-        embeddedImage = await pdfDoc.embedPng(imgFile.data);
-      } else {
-        embeddedImage = await pdfDoc.embedJpg(imgFile.data);
-      }
-
-      const imgWidth = embeddedImage.width;
-      const imgHeight = embeddedImage.height;
-
-      let pageWidth, pageHeight;
-
-      if (pageSizeSetting === 'Fit') {
-        // Fit to image sizes directly
-        pageWidth = imgWidth + margin * 2;
-        pageHeight = imgHeight + margin * 2;
-      } else {
-        // Standard A4 or US Letter sizes
-        const standardSize = PAGE_SIZES[pageSizeSetting];
-        if (orientationSetting === 'portrait') {
-          pageWidth = standardSize.width;
-          pageHeight = standardSize.height;
-        } else {
-          pageWidth = standardSize.height;
-          pageHeight = standardSize.width;
-        }
-      }
-
-      const page = pdfDoc.addPage([pageWidth, pageHeight]);
-
-      // Calculate placement dimensions (preserving aspect ratio)
-      const maxDrawWidth = pageWidth - margin * 2;
-      const maxDrawHeight = pageHeight - margin * 2;
-
-      let drawWidth = imgWidth;
-      let drawHeight = imgHeight;
-
-      // Scale to fit available width and height
-      const scale = Math.min(maxDrawWidth / imgWidth, maxDrawHeight / imgHeight);
-      drawWidth = imgWidth * scale;
-      drawHeight = imgHeight * scale;
-
-      // Center the image on the page
-      const x = margin + (maxDrawWidth - drawWidth) / 2;
-      const y = margin + (maxDrawHeight - drawHeight) / 2;
-
-      page.drawImage(embeddedImage, {
-        x,
-        y,
-        width: drawWidth,
-        height: drawHeight
-      });
-    }
-
+    const pdfBytes = await buildImagesToPdfBytes();
     updateProgress(85, 'Compiling and saving...');
-    const pdfBytes = await pdfDoc.save();
 
     const saveResult = await window.api.saveFile({
       filePath: dialogResult.filePath,
@@ -1127,7 +1615,7 @@ async function handlePdfToImgFile(files) {
       data: arrayBuffer
     };
 
-    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) }).promise;
+    const pdf = await loadPdfJsDocument(arrayBuffer);
     const pageCount = pdf.numPages;
 
     state.pdfToImg.pages = [];
@@ -1176,15 +1664,20 @@ async function handlePdfToImgFile(files) {
   }
 }
 
-async function renderThumbnail(pdf, pageNum, canvas) {
+async function renderThumbnail(pdf, pageNum, canvas, scale = 0.8) {
   try {
+    if (pdf.destroyed) return;
     const page = await pdf.getPage(pageNum);
-    const viewport = page.getViewport({ scale: 0.8 });
+    if (pdf.destroyed) return;
+    const viewport = page.getViewport({ scale });
     const context = canvas.getContext('2d');
     canvas.height = viewport.height;
     canvas.width = viewport.width;
     await page.render({ canvasContext: context, viewport: viewport }).promise;
   } catch (err) {
+    if (pdf.destroyed || err?.name === 'RenderingCancelledException' || String(err?.message || '').includes('Worker was destroyed')) {
+      return;
+    }
     console.error(`Failed to render thumbnail for page ${pageNum}:`, err);
   }
 }
@@ -1195,28 +1688,9 @@ function updateSelectedPagesCount(skipInputUpdate = false) {
 
   if (!skipInputUpdate) {
     const pages = state.pdfToImg.pages;
-    const selected = pages.filter(p => p.selected).map(p => p.pageNum).sort((a, b) => a - b);
-    let str = '';
-    if (selected.length === 0) str = '';
-    else if (selected.length === pages.length) str = 'All';
-    else {
-      let ranges = [];
-      let start = selected[0];
-      let end = selected[0];
-      for (let i = 1; i < selected.length; i++) {
-        if (selected[i] === end + 1) {
-          end = selected[i];
-        } else {
-          ranges.push(start === end ? `${start}` : `${start}-${end}`);
-          start = selected[i];
-          end = selected[i];
-        }
-      }
-      ranges.push(start === end ? `${start}` : `${start}-${end}`);
-      str = ranges.join(', ');
-    }
+    const selected = pages.filter(p => p.selected).map(p => p.pageNum);
     const inputField = document.getElementById('pdf-to-img-ranges');
-    if (inputField) inputField.value = str;
+    if (inputField) inputField.value = formatPageRanges(selected, pages.length, true);
   }
 }
 
@@ -1298,12 +1772,12 @@ btnRunPdfToImg.addEventListener('click', async () => {
   const folderPath = folderDialogResult.filePaths[0];
   const format = document.getElementById('pdf-to-img-format').value;
   const scale = parseFloat(document.getElementById('pdf-to-img-resolution').value);
-  const prefix = document.getElementById('pdf-to-img-out-prefix').value.trim() || 'page';
+  const prefix = sanitizeFilename(document.getElementById('pdf-to-img-out-prefix').value, 'page');
 
   showProgress('Converting PDF', 'Initializing converter...', 10);
 
   try {
-    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(state.pdfToImg.file.data.slice(0)) }).promise;
+    const pdf = await loadPdfJsDocument(state.pdfToImg.file.data);
     const totalSelected = selectedPages.length;
 
     for (let i = 0; i < totalSelected; i++) {

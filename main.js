@@ -22,7 +22,13 @@ function createWindow() {
   });
 
   mainWindow.loadFile('index.html');
-  
+
+  // Security: prevent external navigations or unexpected popup windows
+  mainWindow.webContents.on('will-navigate', (event) => {
+    event.preventDefault();
+  });
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
   mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
     console.log(`[Renderer] ${message} (line ${line} in ${sourceId})`);
   });
